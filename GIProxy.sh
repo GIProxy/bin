@@ -75,13 +75,13 @@ case "$ARCH_TYPE" in
   # aarch64 is the output of 'uname -m' for 64-bit ARM CPUs in Termux.
   aarch64)
     log_message "Selecting arm64 binary."
-    EXE_PATH="$CLONE_PATH/arm64/GIProxy"
+    EXE_PATH="$CLONE_PATH/android/arm64/GIProxy"
     ;;
   # x86 is the output of 'uname -m' for 32-bit x86 CPUs.
   # i686 is also a common variant for 32-bit x86.
   x86|i686)
     log_message "Selecting x86 binary."
-    EXE_PATH="$CLONE_PATH/x86/GIProxy"
+    EXE_PATH="$CLONE_PATH/android/x86/GIProxy"
     ;;
   *)
     log_message "ERROR: Unsupported or unrecognized architecture '$ARCH_TYPE'."
