@@ -4,8 +4,8 @@ Update GIProxy-bin and run GIProxy.exe elevated using ShellExecute (COM).
 
 .DESCRIPTION
 - Clones repo if missing, or updates it only when remote version differs.
-- Detects OS architecture (amd64/amd32/arm64) to pick the correct executable.
-- **Fixed:** Properly detects existing portable Git to avoid re-downloading.
+- Detects OS architecture (x64/x86/arm64) to pick the correct executable.
+- Properly detects existing portable Git to avoid re-downloading.
 - Launches GIProxy.exe elevated with '--https' via Shell.Application's ShellExecute.
 - Uses English messages inside the script.
 #>
@@ -31,7 +31,6 @@ function Write-Log {
 
 function Get-RemoteVersion {
   try {
-    # Use Invoke-RestMethod to read the text file; fall back gracefully on failure.
     return (Invoke-RestMethod -Uri $remoteVersionUrl -UseBasicParsing).Trim()
   } catch {
     Write-Log "Warning: Failed to fetch remote version: $($_.Exception.Message)"
@@ -41,45 +40,47 @@ function Get-RemoteVersion {
 
 function Install-PortableGit {
   Write-Log "Git not found. Downloading and installing portable Git..."
-  $gitPortableUrl = "https://github.com/git-for-windows/git/releases/download/v2.44.0.windows.1/PortableGit-2.44.0-64-bit.7z.exe"
-  
-  # Check for 32-bit or other architectures; for now, we only provide a link for 64-bit due to repo limitations.
-  # Note: If you need 32-bit portable Git, you'll need to update this URL.
-  $arch = "64-bit"
-  if (-not [Environment]::Is64BitOperatingSystem) {
-    $arch = "32-bit"
-    $gitPortableUrl = "https://github.com/git-for-windows/git/releases/download/v2.44.0.windows.1/PortableGit-2.44.0-32-bit.7z.exe"
+  # NOTE: update these URLs if you want a newer PortableGit release.
+  $is64 = [Environment]::Is64BitOperatingSystem
+  $archLabel = if ($is64) { "64-bit" } else { "32-bit" }
+
+  # Official Git for Windows portable self-extracting links (example versions)
+  $gitPortableUrl = if ($is64) {
+    "https://github.com/git-for-windows/git/releases/download/v2.44.0.windows.1/PortableGit-2.44.0-64-bit.7z.exe"
+  } else {
+    "https://github.com/git-for-windows/git/releases/download/v2.44.0.windows.1/PortableGit-2.44.0-32-bit.7z.exe"
   }
 
-  # Download the self-extracting archive
+  # There is no official arm64 PortableGit in many releases; if running on ARM64, try 64-bit x64 as fallback.
+  if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() -eq "Arm64") {
+    Write-Log "Running on Arm64. Portable Git ARM builds may not exist; will try 64-bit portable Git as fallback."
+    $gitPortableUrl = "https://github.com/git-for-windows/git/releases/download/v2.44.0.windows.1/PortableGit-2.44.0-64-bit.7z.exe"
+  }
+
   try {
     $downloadPath = Join-Path $scriptDir "PortableGit.7z.exe"
-    
-    # Create portable git directory if it doesn't exist
+
     if (-not (Test-Path $portableGitDir)) {
       New-Item -Path $portableGitDir -ItemType Directory | Out-Null
     }
-    
-    Write-Log "Downloading portable Git ($arch) from $gitPortableUrl..."
+
+    Write-Log "Downloading portable Git ($archLabel) from $gitPortableUrl..."
     Invoke-WebRequest -Uri $gitPortableUrl -OutFile $downloadPath -UseBasicParsing
-    
-    # Extract the archive
+
     Write-Log "Extracting portable Git to $portableGitDir..."
+    # Self-extracting 7z exe supports /S /D= extraction arguments in many builds
     & $downloadPath /S /D=$portableGitDir
-    
-    # Clean up downloaded file
+
     if (Test-Path $downloadPath) {
       Remove-Item $downloadPath -Force
     }
-    
-    # Verify extraction was successful
+
     if (-not (Test-Path $portableGitExePath)) {
       throw "Failed to extract portable Git - executable not found at $portableGitExePath"
     }
-    
+
     Write-Log "Portable Git installed successfully at: $portableGitDir"
     return $portableGitExePath
-    
   } catch {
     throw "Failed to download or install portable Git: $($_.Exception.Message)"
   }
@@ -88,26 +89,41 @@ function Install-PortableGit {
 try {
   Write-Log "Starting GIProxy update & elevated-run workflow."
 
-  # --- Git Detection Logic (Fixed Order) ---
+  # --- Git Detection Logic ---
   $gitPath = $null
-  
-  # 1. FIRST: Check if portable Git is already installed by this script
+
+  # 1) Check if portable Git already exists
   if (Test-Path $portableGitExePath) {
     $gitPath = $portableGitExePath
     Write-Log "Using existing portable Git from: $gitPath"
   }
-  # 2. SECOND: Check if Git is installed system-wide (only if portable not found)
+  # 2) Check system git (on PATH)
   elseif (Get-Command git -ErrorAction SilentlyContinue) {
     $gitPath = (Get-Command git).Source
     Write-Log "Using system-wide Git from: $gitPath"
   }
-  # 3. LAST RESORT: Download and install portable Git
+  # 3) Try to find git in common Program Files locations (Windows installers)
   else {
+    $possiblePaths = @(
+      "$env:ProgramFiles\Git\cmd\git.exe",
+      "$env:ProgramFiles(x86)\Git\cmd\git.exe",
+      "$env:ProgramW6432\Git\cmd\git.exe"
+    )
+    foreach ($p in $possiblePaths) {
+      if (Test-Path $p) {
+        $gitPath = $p
+        Write-Log "Found Git at: $gitPath"
+        break
+      }
+    }
+  }
+
+  # 4) If still not found, download portable Git
+  if (-not $gitPath) {
     $gitPath = Install-PortableGit
     Write-Log "Portable Git has been installed and will be used from: $gitPath"
   }
 
-  # Verify git path exists before proceeding
   if (-not (Test-Path $gitPath)) {
     throw "Git executable not found at: $gitPath"
   }
@@ -145,55 +161,63 @@ try {
     }
   }
 
-  # --- Continue with GIProxy.exe launch ---
-  # Detect architecture and map to directory name
-  $platform = ""
-  switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()) {
-    "Arm64" { $platform = "arm64" }
-    "X64"   { $platform = "amd64" }
-    "X86"   { $platform = "amd32" }
-    default { throw "Unsupported architecture: $([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)" }
+  # --- Determine platform directory name (support both x64/amd64 and x86/amd32) ---
+  $osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+  Write-Log "Runtime OSArchitecture: $osArch"
+
+  # canonical prefered names we will try first: x64, x86, arm64
+  switch ($osArch) {
+    "Arm64" { $primaryNames = @("arm64") }
+    "X64"   { $primaryNames = @("x64","amd64") }
+    "X86"   { $primaryNames = @("x86","amd32") }
+    default { $primaryNames = @("x64","amd64","x86","amd32","arm64") }
   }
-  Write-Log "Detected platform: $platform"
 
-  # Determine exe path
-  $exePathPrimary = Join-Path $clonePath "win\$platform\Release\GIProxy.exe"
-  $exePath = $exePathPrimary
+  Write-Log ("Preferred platform folder names to try: {0}" -f ($primaryNames -join ", "))
 
-  if (-not (Test-Path $exePath)) {
-      Write-Log "Executable not found at primary path: $exePathPrimary. Trying alternate architectures..."
-      $foundAlt = $false
-      $architectures = @("amd64", "amd32", "arm64") | Where-Object { $_ -ne $platform }
-      foreach ($altPlatform in $architectures) {
-        $exePathAlt = Join-Path $clonePath "win\$altPlatform\Release\GIProxy.exe"
-        if (Test-Path $exePathAlt) {
-          $exePath = $exePathAlt
-          Write-Log "Found executable at alternate path: $exePathAlt"
-          $foundAlt = $true
-          break
-        }
-      }
-      if (-not $foundAlt) {
-        throw "GIProxy.exe not found in any architecture path."
-      }
-  } else {
-    Write-Log "Found executable: $exePath"
+  # Build candidate paths to try (primary first, then other common alternatives)
+  $candidateDirs = @()
+  foreach ($name in $primaryNames) {
+    $candidateDirs += Join-Path $clonePath "win\$name\Release"
+    $candidateDirs += Join-Path $clonePath "win\$name" # sometimes no Release folder
+  }
+
+  # Also add common alternate names if not present already
+  $fallbackNames = @("amd64","amd32","x64","x86","arm64") | Where-Object { $primaryNames -notcontains $_ }
+  foreach ($name in $fallbackNames) {
+    $candidateDirs += Join-Path $clonePath "win\$name\Release"
+    $candidateDirs += Join-Path $clonePath "win\$name"
+  }
+
+  # Normalize unique candidate dirs
+  $candidateDirs = $candidateDirs | Select-Object -Unique
+
+  $exePath = $null
+  foreach ($dir in $candidateDirs) {
+    $tryExe = Join-Path $dir "GIProxy.exe"
+    if (Test-Path $tryExe) {
+      $exePath = $tryExe
+      Write-Log "Found executable at: $exePath"
+      break
+    } else {
+      Write-Log "Not found at: $tryExe"
+    }
+  }
+
+  if (-not $exePath) {
+    throw "GIProxy.exe not found in any expected architecture path. Checked: `n$($candidateDirs -join "`n")"
   }
 
   # Launch elevated using Shell.Application COM (ShellExecute 'runas').
   Write-Log "Launching elevated process using ShellExecute (COM) with argument: $exeArg"
   $shell = New-Object -ComObject Shell.Application
 
-  # ShellExecute parameters: (File, Arguments, WorkingDirectory, Operation, ShowCmd)
   $workingDir = Split-Path $exePath -Parent
-  # Ensure argument string is safe
   $argsSafe = $exeArg
 
-  # Use ShellExecute to perform a 'runas' (elevation). This will show UAC prompt.
   $shell.ShellExecute($exePath, $argsSafe, $workingDir, "runas", 1)
 
   Write-Log "Command dispatched to elevated process (if UAC accepted, GIProxy will run)."
-  # Do not wait here — ShellExecute returns immediately.
 } catch {
   Write-Log "ERROR: $($_.Exception.Message)"
   exit 1

@@ -20,3 +20,13 @@ deepDebug|0
 
 # Change to 1 for write the packet debugger into logFile (debug must be 1)
 writeDebug|0
+
+# Change to 1 for enable Discord presence
+enableDiscordPresence|1
+
+# Set presence description
+presenceDescription|Rose is red, Violet is blue, Error unexpected line 42
+
+# Set custom button (if you want)
+# example: presenceButton|Visit My Server|https://your-url.com
+presenceButton||
