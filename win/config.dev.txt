@@ -1,5 +1,7 @@
 # This is a comment line
 # This config is dedicated for developers only. So, if you are not a developer or don't know what you do, don't change anything, it will break the proxy functionality
 
-webSocket|
+websocket|
 api|
+auth|
+authKey|

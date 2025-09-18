@@ -1,3 +1,4 @@
 Debug/
 debug/
 logs/
+*.key
