@@ -3,8 +3,14 @@
 # Set 'auto' for auto detecting real server IP
 realServerHost|auto
 
+# Spoof version (set to 'auto' for auto detect version)
+spoofVersion|auto
+
+# Spoof protocol
+spoofProtocol|219
+
 # When the 'realServerHost' seted to 'auto' it will set the port too (automaticly)
-realServerPort|17044
+realServerPort|17004
 
 # host for proxy server (don't change it if you don't know what you do)
 proxyServerHost|127.0.0.1
