@@ -12,11 +12,19 @@ set -e
 REPO_URL="https://github.com/GIProxy/bin.git"
 REPO_BRANCH="main"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="$SCRIPT_DIR/GIProxy"
 VERSION_FILE="version"
 SKIP_UPDATE=0
 FORCE_UPDATE=0
 FORCE_ARCH=""
+
+# Check if we're already in the repository (version file exists)
+if [ -f "$SCRIPT_DIR/$VERSION_FILE" ]; then
+    INSTALL_DIR="$SCRIPT_DIR"
+    IN_REPO=1
+else
+    INSTALL_DIR="$SCRIPT_DIR/GIProxy"
+    IN_REPO=0
+fi
 
 # Colors
 COLOR_INFO="\033[0;36m"
@@ -363,11 +371,40 @@ main() {
         install_git
     fi
     
-    log_info "Using Git: $(which git)"
+    log_info "Using Git: $(command -v git)"
     echo ""
     
-    # Check if repository exists
-    if [ ! -d "$INSTALL_DIR/.git" ]; then
+    # Check if we're already in the repository or need to clone
+    if [ $IN_REPO -eq 1 ]; then
+        log_info "Running from repository directory"
+        
+        if [ $SKIP_UPDATE -eq 0 ]; then
+            # Check version
+            local local_version=$(get_local_version)
+            if [ -z "$local_version" ]; then
+                log_info "Local version: unknown"
+            else
+                log_info "Local version: $local_version"
+            fi
+            
+            if [ $FORCE_UPDATE -eq 1 ]; then
+                log_warning "Force update requested"
+                update_repository
+            else
+                log_info "Checking for updates..."
+                update_repository
+                
+                local new_version=$(get_local_version)
+                if [ -n "$new_version" ] && [ "$new_version" != "$local_version" ]; then
+                    log_success "Updated from version $local_version to $new_version"
+                else
+                    log_success "Already up to date"
+                fi
+            fi
+        else
+            log_warning "Skipping update check"
+        fi
+    elif [ ! -d "$INSTALL_DIR/.git" ]; then
         log_info "Repository not found. Initializing..."
         if ! initialize_repository; then
             log_error "Failed to initialize repository"
