@@ -1,6 +1,6 @@
 # GIProxy - Growtopia Proxy
 
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android-lightgrey.svg)](https://github.com/GIProxy/bin)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Android-lightgrey.svg)](https://github.com/GIProxy/bin)
 
 > Unofficial Growtopia Proxy with auto-update functionality for Windows and Android (Termux)
 
