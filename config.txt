@@ -15,7 +15,7 @@ proxyServerPort|17091
 gemsAccumulating|1
 
 # Change to 1 for debugging some packet
-debug|1
+debug|0
 
 # Change to 1 for deep debuging packet (debug must be 1)
 deepDebug|0
@@ -31,4 +31,4 @@ presenceDescription|Rose is red, Violet is blue, Error unexpected line 42
 
 # Set custom button (if you want)
 # example: presenceButton|Visit My Server|https://your-url.com
-presenceButton|PELERRR|https://www.google.com
+presenceButton||

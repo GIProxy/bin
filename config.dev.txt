@@ -1,8 +1,8 @@
 # This is a comment line
 # This config is dedicated for developers only. So, if you are not a developer or don't know what you do, don't change anything, it will break the proxy functionality
 
-relay|https://localhost:17002
-relayKey|apalah
-auth|https://localhost:17000
-authKey|apalah
-websocket|wss://localhost:17001
+relay|
+relayKey|
+auth|
+authKey|
+websocket|

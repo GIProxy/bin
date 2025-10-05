@@ -1,12 +1,11 @@
 # GIProxy - Growtopia Proxy
 
-[![Version](https://img.shields.io/badge/version-0.1.3-blue.svg)](https://github.com/GIProxy/bin)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android-lightgrey.svg)](https://github.com/GIProxy/bin)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-> Unofficial Growtopia Proxy with auto-update functionality for Windows, Linux, macOS, and Android (Termux)
+> Unofficial Growtopia Proxy with auto-update functionality for Windows and Android (Termux)
 
 ## 🚀 Quick Start
+> Don't forget to download installer script
 
 ### Windows
 
@@ -21,13 +20,6 @@ GIProxy.bat
 ```
 
 **First run creates a desktop shortcut automatically!**
-
-### Linux / macOS
-
-```bash
-chmod +x GIProxy.sh
-./GIProxy.sh
-```
 
 ### Android (Termux - Non-Root)
 
@@ -98,7 +90,7 @@ REM Specify architecture
 GIProxy.bat -Architecture x64
 ```
 
-### Linux / macOS / Android (Shell)
+### Android (Shell)
 
 ```bash
 # Normal run with auto-update
@@ -146,22 +138,9 @@ presenceButton|Visit Server|https://your-url.com
 ## 🔧 Requirements
 
 ### Windows
-- **OS:** Windows 10/11 (x64, x86, or ARM64)
+- **OS:** Windows 7/8/10/11 (x64, x86, or ARM64)
 - **Git:** Auto-installed by launcher if not present
 - **PowerShell:** 5.1 or later (included in Windows 10+) - for `.ps1` launcher
-- **.NET:** Framework or Core (for executable runtime)
-
-### Linux
-- **OS:** Any modern Linux distribution
-- **Git:** Auto-installed by launcher if not present (requires sudo for apt/dnf/pacman/yum)
-- **Architecture:** x64, x86, ARM64, or ARMv7
-- **Bash:** Version 4.0 or later
-
-### macOS
-- **OS:** macOS 10.13 or later
-- **Git:** Auto-installed via Homebrew/Xcode by launcher if not present
-- **Architecture:** x64 (Intel) or ARM64 (Apple Silicon)
-- **Bash:** Version 3.2 or later (included in macOS)
 
 ### Android (Termux)
 - **App:** Termux from F-Droid (not Play Store version)
@@ -226,15 +205,13 @@ Pull with Rebase → Restore Stashed Changes → Launch
 
 ### Update Failures
 - **Windows:** Run `.\GIProxy.ps1 -ForceUpdate` or `GIProxy.bat -ForceUpdate`
-- **Linux/macOS/Android:** Run `./GIProxy.sh -ForceUpdate`
+- **Android:** Run `./GIProxy.sh -ForceUpdate`
 - Manually delete `GIProxy/.git` folder and re-run
 - Check your internet connection
 
 ### Git Issues
 - **All Platforms:** The launcher automatically installs Git if not found
 - **Windows:** Git Portable is downloaded and extracted automatically
-- **Linux:** Requires sudo access for package manager (apt/dnf/pacman/yum)
-- **macOS:** Installs via Homebrew or Xcode Command Line Tools
 - **Android/Termux:** Installs via `pkg install git` automatically
 - **Manual Install:** If auto-install fails, install Git manually and re-run the launcher
 
@@ -243,7 +220,7 @@ Pull with Rebase → Restore Stashed Changes → Launch
 - Your configs are stashed before updates
 - Run `git stash pop` to restore manually
 
-### Permission Denied (Linux/macOS/Android)
+### Permission Denied (Android)
 ```bash
 # Make the launcher executable
 chmod +x GIProxy.sh
