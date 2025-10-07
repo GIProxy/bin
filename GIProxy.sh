@@ -263,6 +263,23 @@ update_repository() {
     return 0
 }
 
+# Fix Android binary permissions after update
+fix_android_permissions() {
+    log_info "Setting executable permissions for Android binaries..."
+    
+    # Set permissions for all Android architectures
+    for arch_dir in "$INSTALL_DIR"/android/*/; do
+        if [ -d "$arch_dir" ]; then
+            local binary="$arch_dir/GIProxy"
+            if [ -f "$binary" ]; then
+                chmod +x "$binary" 2>/dev/null
+                local arch_name=$(basename "$arch_dir")
+                log_success "Set executable permission for android/$arch_name/GIProxy"
+            fi
+        fi
+    done
+}
+
 # Get executable path
 get_executable_path() {
     local platform="$1"
@@ -282,18 +299,18 @@ get_executable_path() {
         fi
     elif [ "$platform" == "linux" ]; then
         # Linux executables
-        if [ -f "$INSTALL_DIR/linux/$arch/Debug/GIProxy" ]; then
-            build_type="Debug"
-        else
+        if [ -f "$INSTALL_DIR/linux/$arch/Release/GIProxy" ]; then
             build_type="Release"
+        else
+            build_type="Debug"
         fi
         exe_path="$INSTALL_DIR/linux/$arch/$build_type/GIProxy"
     elif [ "$platform" == "macos" ]; then
         # macOS executables
-        if [ -f "$INSTALL_DIR/macos/$arch/Debug/GIProxy" ]; then
-            build_type="Debug"
-        else
+        if [ -f "$INSTALL_DIR/macos/$arch/Release/GIProxy" ]; then
             build_type="Release"
+        else
+            build_type="Debug"
         fi
         exe_path="$INSTALL_DIR/macos/$arch/$build_type/GIProxy"
     else
@@ -390,6 +407,11 @@ main() {
             if [ $FORCE_UPDATE -eq 1 ]; then
                 log_warning "Force update requested"
                 update_repository
+                
+                # Fix Android permissions after update
+                if [ "$platform" == "android" ]; then
+                    fix_android_permissions
+                fi
             else
                 log_info "Checking for updates..."
                 update_repository
@@ -397,6 +419,11 @@ main() {
                 local new_version=$(get_local_version)
                 if [ -n "$new_version" ] && [ "$new_version" != "$local_version" ]; then
                     log_success "Updated from version $local_version to $new_version"
+                    
+                    # Fix Android permissions after update
+                    if [ "$platform" == "android" ]; then
+                        fix_android_permissions
+                    fi
                 else
                     log_success "Already up to date"
                 fi
@@ -410,6 +437,11 @@ main() {
             log_error "Failed to initialize repository"
             exit 1
         fi
+        
+        # Fix Android permissions after initial clone
+        if [ "$platform" == "android" ]; then
+            fix_android_permissions
+        fi
     elif [ $SKIP_UPDATE -eq 0 ]; then
         # Check version
         local local_version=$(get_local_version)
@@ -422,6 +454,11 @@ main() {
         if [ $FORCE_UPDATE -eq 1 ]; then
             log_warning "Force update requested"
             update_repository
+            
+            # Fix Android permissions after update
+            if [ "$platform" == "android" ]; then
+                fix_android_permissions
+            fi
         else
             log_info "Checking for updates..."
             update_repository
@@ -429,6 +466,11 @@ main() {
             local new_version=$(get_local_version)
             if [ -n "$new_version" ] && [ "$new_version" != "$local_version" ]; then
                 log_success "Updated from version $local_version to $new_version"
+                
+                # Fix Android permissions after update
+                if [ "$platform" == "android" ]; then
+                    fix_android_permissions
+                fi
             else
                 log_success "Already up to date"
             fi

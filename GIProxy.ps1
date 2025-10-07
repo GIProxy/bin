@@ -274,7 +274,7 @@ function Update-Repository {
 function Get-ExecutablePath {
   param([string]$Arch)
     
-  $buildType = if (Test-Path (Join-Path $InstallDir "win\$Arch\Debug\GIProxy.exe")) { "Debug" } else { "Release" }
+  $buildType = if (Test-Path (Join-Path $InstallDir "win\$Arch\Release\GIProxy.exe")) { "Release" } else { "Debug" }
   $exePath = Join-Path $InstallDir "win\$Arch\$buildType\GIProxy.exe"
     
   if (Test-Path $exePath) {

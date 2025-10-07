@@ -243,10 +243,10 @@ if defined LOCAL_VERSION (
 goto :eof
 
 :get_executable_path
-if exist "%INSTALL_DIR%\win\%ARCH%\Debug\GIProxy.exe" (
-    set "BUILD_TYPE=Debug"
-) else (
+if exist "%INSTALL_DIR%\win\%ARCH%\Release\GIProxy.exe" (
     set "BUILD_TYPE=Release"
+) else (
+    set "BUILD_TYPE=Debug"
 )
 
 set "EXE_PATH=%INSTALL_DIR%\win\%ARCH%\!BUILD_TYPE!\GIProxy.exe"
