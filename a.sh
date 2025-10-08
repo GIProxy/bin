@@ -261,6 +261,23 @@ update_repository() {
 get_executable_path() {
   local arch="$1"
   
+  # For Android/Termux, try to find native ARM64 binary first
+  if command -v pkg >/dev/null 2>&1 && [[ "$arch" == "arm64" ]]; then
+    # Check for native ARM64 binary first
+    if [[ -f "$INSTALL_DIR/android/arm64/GIProxy" ]]; then
+      echo "$INSTALL_DIR/android/arm64/GIProxy"
+      return 0
+    fi
+    
+    # Check for aarch64 variant
+    if [[ -f "$INSTALL_DIR/android/aarch64/GIProxy" ]]; then
+      echo "$INSTALL_DIR/android/aarch64/GIProxy"
+      return 0
+    fi
+    
+    echo "[WARNING] - No native ARM64 binary found, falling back to x64 (may require emulation)"
+  fi
+  
   # Map arm64 to x64 for Android since there's no arm64 directory
   # WARNING: This assumes x64 binaries work on ARM64 Android (may require emulation)
   local android_arch="$arch"
@@ -284,6 +301,8 @@ get_executable_path() {
   else
     echo "[ERROR] - Executable not found for $arch"
     echo "[ERROR] - Checked paths:"
+    echo "-  $INSTALL_DIR/android/arm64/GIProxy (native ARM64)"
+    echo "-  $INSTALL_DIR/android/aarch64/GIProxy (ARM64 variant)"
     echo "-  $INSTALL_DIR/android/$android_arch/GIProxy"
     echo "-  $INSTALL_DIR/linux/$arch/Release/GIProxy"
     echo "-  $INSTALL_DIR/linux/$arch/Debug/GIProxy"
@@ -306,8 +325,24 @@ start_giproxy() {
     exit 1
   fi
   
-  # Make executable if not already
-  chmod +x "$exe_path"
+  # Check if file is actually executable
+  if [[ ! -x "$exe_path" ]]; then
+    echo "[INFO] - Setting executable permissions..."
+    chmod +x "$exe_path"
+  fi
+  
+  # Check file type and architecture compatibility
+  if command -v file >/dev/null 2>&1; then
+    local file_info
+    file_info=$(file "$exe_path")
+    echo "[INFO] - Binary info: $file_info"
+    
+    # Check if it's an x86_64 binary on ARM system
+    if echo "$file_info" | grep -q "x86-64\|x86_64" && [[ "$arch" == "arm64" ]]; then
+      echo "[WARNING] - Attempting to run x64 binary on ARM64 system"
+      echo "[WARNING] - This may fail or require emulation support"
+    fi
+  fi
   
   local working_dir="$(dirname "$exe_path")"
   
@@ -321,9 +356,32 @@ start_giproxy() {
     exit 1
   }
   
-  # Start the process
-  if ! "$exe_path"; then
-    echo "[ERROR] - Error running GIProxy"
+  # Try to start the process with better error handling
+  local binary_name
+  binary_name=$(basename "$exe_path")
+  
+  echo "[INFO] - Attempting to execute: ./$binary_name"
+  
+  if ! "./$binary_name"; then
+    local exit_code=$?
+    echo "[ERROR] - GIProxy execution failed with exit code: $exit_code"
+    
+    # Provide helpful error messages based on common issues
+    case $exit_code in
+      126)
+        echo "[ERROR] - Permission denied or binary cannot be executed"
+        echo "[HINT] - This might be an architecture mismatch (x64 binary on ARM64 system)"
+        ;;
+      127)
+        echo "[ERROR] - Command not found or missing dependencies"
+        echo "[HINT] - Check if all required libraries are installed"
+        ;;
+      *)
+        echo "[ERROR] - Unknown execution error"
+        echo "[HINT] - Check system logs or try running with strace for more details"
+        ;;
+    esac
+    
     cd "$original_dir" || true
     exit 1
   fi
