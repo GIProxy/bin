@@ -305,10 +305,10 @@ start_giproxy() {
         exit 1
     fi
     
-    if [[ ! -f "$exe_path" ]]; then
-        write_color_output "Cannot start GIProxy: executable not found at $exe_path" "ERROR"
-        exit 1
-    fi
+    # if [[ ! -f "$exe_path" ]]; then
+    #     write_color_output "Cannot start GIProxy: executable not found at $exe_path" "ERROR"
+    #     exit 1
+    # fi
     
     # Make executable if not already
     chmod +x "$exe_path"
