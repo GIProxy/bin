@@ -3,8 +3,9 @@
 # ========================================
 # GIProxy Auto-Updater and Launcher (SH)
 # ========================================
-# Version: 1.0.0
+# Version: 2.0.0
 # Author: GIProxy Team
+# Optimized for Termux Android Environment
 
 set -e
 
@@ -26,7 +27,10 @@ else
     IN_REPO=0
 fi
 
-# Colors
+# Get the directory where this script is located (bin folder)
+BIN_DIR="$INSTALL_DIR"
+
+# Colors for output
 COLOR_INFO="\033[0;36m"
 COLOR_SUCCESS="\033[0;32m"
 COLOR_WARNING="\033[0;33m"
@@ -72,7 +76,38 @@ log_error() {
     echo -e "${COLOR_ERROR}[ERROR] $1${COLOR_RESET}"
 }
 
-# Detect platform and architecture
+# Detect Android architecture for Termux
+detect_android_arch() {
+    local machine=$(uname -m)
+    local arch=""
+    
+    if [ -n "$FORCE_ARCH" ]; then
+        arch="$FORCE_ARCH"
+    else
+        case $machine in
+            x86_64|amd64)
+                arch="x64"
+                ;;
+            i386|i686)
+                arch="x86"
+                ;;
+            aarch64|arm64)
+                arch="arm64"
+                ;;
+            armv7l|armv7)
+                arch="armv7"
+                ;;
+            *)
+                # Default to x64 if unknown
+                arch="x64"
+                ;;
+        esac
+    fi
+    
+    echo "$arch"
+}
+
+# Detect platform and architecture (legacy support for other platforms)
 detect_platform() {
     local platform=""
     local arch=""
@@ -80,12 +115,12 @@ detect_platform() {
     # Detect OS
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
         platform="linux"
-    elif [[ "$OSTYPE" == "linux-android"* ]]; then
+    elif [[ "$OSTYPE" == "linux-android"* ]] || check_termux_environment; then
         platform="android"
     elif [[ "$OSTYPE" == "darwin"* ]]; then
         platform="macos"
     else
-        platform="unknown"
+        platform="android"  # Default to android for Termux
     fi
     
     # Detect architecture
@@ -115,6 +150,14 @@ detect_platform() {
     echo "$platform:$arch"
 }
 
+# Check if running in Termux
+check_termux_environment() {
+    if [ -n "$TERMUX_VERSION" ] || [ -d "/data/data/com.termux" ] || [[ "$PREFIX" == *"termux"* ]]; then
+        return 0
+    fi
+    return 1
+}
+
 # Check if Git is installed
 check_git() {
     if command -v git &> /dev/null; then
@@ -130,7 +173,7 @@ install_git() {
     
     local install_success=0
     
-    if [[ "$OSTYPE" == "linux-android"* ]]; then
+    if [[ "$OSTYPE" == "linux-android"* ]] || check_termux_environment; then
         # Termux
         log_info "Installing Git via Termux package manager..."
         if pkg install -y git &> /dev/null; then
@@ -185,7 +228,7 @@ install_git() {
         echo "Please install Git manually using one of the following commands:"
         echo ""
         
-        if [[ "$OSTYPE" == "linux-android"* ]]; then
+        if check_termux_environment; then
             echo "  Termux:     pkg install git"
         elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
             echo "  Ubuntu/Debian:  sudo apt-get install git"
@@ -280,7 +323,32 @@ fix_android_permissions() {
     done
 }
 
-# Get executable path
+# Check if GIProxy executable exists for detected architecture
+find_giproxy_executable() {
+    local arch="$1"
+    local exe_path="$BIN_DIR/android/$arch/GIProxy"
+    
+    if [ -f "$exe_path" ]; then
+        echo "$exe_path"
+        return 0
+    fi
+    
+    # Fallback: try other architectures
+    for fallback_arch in x64 x86 arm64 armv7; do
+        if [ "$fallback_arch" != "$arch" ]; then
+            local fallback_path="$BIN_DIR/android/$fallback_arch/GIProxy"
+            if [ -f "$fallback_path" ]; then
+                log_warning "Using fallback architecture: $fallback_arch (detected: $arch)"
+                echo "$fallback_path"
+                return 0
+            fi
+        fi
+    done
+    
+    return 1
+}
+
+# Get executable path (enhanced version supporting all platforms)
 get_executable_path() {
     local platform="$1"
     local arch="$2"
@@ -289,9 +357,11 @@ get_executable_path() {
     
     # Determine build type and path based on platform
     if [ "$platform" == "android" ]; then
-        # Android executables
-        if [ -f "$INSTALL_DIR/android/$arch/GIProxy" ]; then
-            exe_path="$INSTALL_DIR/android/$arch/GIProxy"
+        # Android executables - use enhanced detection
+        exe_path=$(find_giproxy_executable "$arch")
+        if [ $? -eq 0 ]; then
+            echo "$exe_path"
+            return 0
         else
             log_error "Executable not found for Android $arch"
             log_error "Expected path: $INSTALL_DIR/android/$arch/GIProxy"
@@ -328,7 +398,15 @@ get_executable_path() {
     fi
 }
 
-# Start GIProxy
+# Check if running in Termux
+check_termux_environment() {
+    if [ -n "$TERMUX_VERSION" ] || [ -d "/data/data/com.termux" ] || [[ "$PREFIX" == *"termux"* ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# Start GIProxy (optimized for Termux Android with main thread execution)
 start_giproxy() {
     local platform="$1"
     local arch="$2"
@@ -342,28 +420,65 @@ start_giproxy() {
     # Make executable if not already
     chmod +x "$exe_path" 2>/dev/null
     
-    local working_dir=$(dirname "$exe_path")
-    
-    log_info "Starting GIProxy..."
-    log_info "Executable: $exe_path"
-    log_info "Working Directory: $working_dir"
-    echo ""
-    echo -e "${COLOR_SUCCESS}================================${COLOR_RESET}"
-    echo -e "${COLOR_SUCCESS}     GIProxy Starting...        ${COLOR_RESET}"
-    echo -e "${COLOR_SUCCESS}================================${COLOR_RESET}"
-    echo ""
-    
-    cd "$working_dir"
-    "$exe_path"
-    local exit_code=$?
-    
-    if [ $exit_code -ne 0 ]; then
+    # For Termux Android optimization: use bin directory as working directory
+    if [ "$platform" == "android" ] && check_termux_environment; then
+        log_info "Termux Android detected - optimizing execution..."
+        
+        # Set working directory to bin folder
+        log_info "Setting working directory to: $BIN_DIR"
+        cd "$BIN_DIR"
+        
+        # Verify required files exist
+        if [ ! -f "config.txt" ]; then
+            log_warning "config.txt not found in bin directory"
+        fi
+        
+        if [ ! -f "items.dat" ]; then
+            log_warning "items.dat not found in bin directory"
+        fi
+        
+        # Get relative path for execution
+        local relative_path=$(realpath --relative-to="$BIN_DIR" "$exe_path")
+        
+        log_info "Starting GIProxy..."
+        log_info "Executable: $exe_path"
+        log_info "Relative Path: $relative_path"
+        log_info "Working Dir: $BIN_DIR"
+        log_info "Architecture: $arch"
         echo ""
-        log_error "GIProxy exited with error code $exit_code"
+        echo -e "${COLOR_SUCCESS}================================${COLOR_RESET}"
+        echo -e "${COLOR_SUCCESS}     GIProxy is starting...      ${COLOR_RESET}"
+        echo -e "${COLOR_SUCCESS}     (Termux Optimized)         ${COLOR_RESET}"
+        echo -e "${COLOR_SUCCESS}================================${COLOR_RESET}"
+        echo ""
+        
+        # Execute GIProxy in main thread with relative path
+        exec "./$relative_path"
+    else
+        # Standard execution for other platforms
+        local working_dir=$(dirname "$exe_path")
+        
+        log_info "Starting GIProxy..."
+        log_info "Executable: $exe_path"
+        log_info "Working Directory: $working_dir"
+        echo ""
+        echo -e "${COLOR_SUCCESS}================================${COLOR_RESET}"
+        echo -e "${COLOR_SUCCESS}     GIProxy Starting...        ${COLOR_RESET}"
+        echo -e "${COLOR_SUCCESS}================================${COLOR_RESET}"
+        echo ""
+        
+        cd "$working_dir"
+        "$exe_path"
+        local exit_code=$?
+        
+        if [ $exit_code -ne 0 ]; then
+            echo ""
+            log_error "GIProxy exited with error code $exit_code"
+        fi
+        
+        cd "$SCRIPT_DIR"
+        return $exit_code
     fi
-    
-    cd "$SCRIPT_DIR"
-    return $exit_code
 }
 
 # Main execution
@@ -381,15 +496,22 @@ main() {
     
     log_info "Platform: $platform"
     log_info "Architecture: $arch"
-    echo ""
     
-    # Check Git installation
-    if ! check_git; then
-        install_git
+    # Check if running in Termux
+    if check_termux_environment; then
+        log_success "Termux environment detected"
     fi
-    
-    log_info "Using Git: $(command -v git)"
     echo ""
+    
+    # Check Git installation (skip for Termux if not needed for updates)
+    if [ $SKIP_UPDATE -eq 0 ]; then
+        if ! check_git; then
+            install_git
+        fi
+        
+        log_info "Using Git: $(command -v git)"
+        echo ""
+    fi
     
     # Check if we're already in the repository or need to clone
     if [ $IN_REPO -eq 1 ]; then
@@ -431,7 +553,7 @@ main() {
         else
             log_warning "Skipping update check"
         fi
-    elif [ ! -d "$INSTALL_DIR/.git" ]; then
+    elif [ ! -d "$INSTALL_DIR/.git" ] && [ $SKIP_UPDATE -eq 0 ]; then
         log_info "Repository not found. Initializing..."
         if ! initialize_repository; then
             log_error "Failed to initialize repository"
@@ -484,5 +606,10 @@ main() {
     start_giproxy "$platform" "$arch"
 }
 
+# Trap signals to ensure clean exit
+trap 'echo ""; log_info "Script interrupted"; exit 130' INT
+trap 'echo ""; log_info "Script terminated"; exit 143' TERM
+
 # Run main function
 main "$@"
+}
