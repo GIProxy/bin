@@ -24,6 +24,11 @@ if [[ -d "$TERMUX_PREFIX" ]]; then
   IS_TERMUX=true
 fi
 
+HOST_ARCH=$(uname -m 2>/dev/null || echo unknown)
+BINARY_ARCH=""
+NEEDS_EMULATION=false
+STORAGE_CHECK_PERFORMED=false
+
 #configuration
 REPO_URL="https://github.com/GIProxy/bin.git"
 REPO_BRANCH="main"
@@ -65,6 +70,30 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+print_termux_storage_notice() {
+  if [[ "$IS_TERMUX" == true && "$STORAGE_CHECK_PERFORMED" == false ]]; then
+    STORAGE_CHECK_PERFORMED=true
+    if [[ ! -d "$HOME/storage" ]]; then
+      echo "[WARNING] - Termux storage access may be limited"
+      echo "[INFO] - You may need to run 'termux-setup-storage' to access external storage"
+      echo "[INFO] - Continuing with internal storage only..."
+    fi
+  fi
+}
+
+check_network_connectivity() {
+  if command -v curl >/dev/null 2>&1; then
+    if curl --connect-timeout 5 -Is "https://github.com" >/dev/null 2>&1; then
+      return 0
+    fi
+  elif command -v ping >/dev/null 2>&1; then
+    if ping -c 1 -W 3 github.com >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  return 1
+}
 
 # Function to detect system architecture
 get_system_architecture() {
@@ -255,23 +284,32 @@ update_repository() {
 get_executable_path() {
   local arch="$1"
   
-  # Map arm64 to x64 for Android since there's no arm64 directory
-  local android_arch="$arch"
-  if [[ "$arch" == "arm64" ]]; then
-    android_arch="x64"
+  # Prefer architecture-specific Android builds first
+  if [[ -f "$INSTALL_DIR/android/$arch/GIProxy" ]]; then
+    BINARY_ARCH="$arch"
+    echo "$INSTALL_DIR/android/$arch/GIProxy"
+    return 0
   fi
   
-  # Android executables are directly in the arch directory (no Release/Debug subdirs)
-  if [[ -f "$INSTALL_DIR/android/$android_arch/GIProxy" ]]; then
-    echo "$INSTALL_DIR/android/$android_arch/GIProxy"
-    return 0
+  # For arm64 hosts we may only have x64 builds available
+  if [[ "$arch" == "arm64" ]]; then
+    local fallback_path="$INSTALL_DIR/android/x64/GIProxy"
+    if [[ -f "$fallback_path" ]]; then
+      BINARY_ARCH="x64"
+      NEEDS_EMULATION=true
+      echo "[WARNING] - No native ARM64 binary found. Using x64 build (emulation required)." >&2
+      echo "$fallback_path"
+      return 0
+    fi
   fi
   
   # Try alternative paths for different platforms
   if [[ -f "$INSTALL_DIR/linux/$arch/Release/GIProxy" ]]; then
+    BINARY_ARCH="$arch"
     echo "$INSTALL_DIR/linux/$arch/Release/GIProxy"
     return 0
   elif [[ -f "$INSTALL_DIR/linux/$arch/Debug/GIProxy" ]]; then
+    BINARY_ARCH="$arch"
     echo "$INSTALL_DIR/linux/$arch/Debug/GIProxy"
     return 0
   else
@@ -297,6 +335,24 @@ start_giproxy() {
   if [[ ! -f "$exe_path" ]]; then
     echo "[ERROR] - Cannot start GIProxy: executable not found at $exe_path"
     exit 1
+  fi
+  
+  if [[ "$NEEDS_EMULATION" == true ]]; then
+    if [[ "$HOST_ARCH" =~ ^(x86_64|amd64)$ ]]; then
+      echo "[INFO] - Host is x86_64; continuing with x64 fallback binary."
+    else
+      echo "[WARNING] - Host architecture ($HOST_ARCH) cannot run $BINARY_ARCH binaries natively."
+      if [[ "$IS_TERMUX" == true ]]; then
+        echo "[INFO] - Recommended options:"
+        echo "  1) Install proot-distro with an x86_64 image and run GIProxy inside it."
+        echo "  2) Build GIProxy from source for arm64 directly on this device."
+        echo "  3) Use a remote machine or VPS that provides an x64 environment."
+      else
+        echo "[INFO] - Please enable x64 emulation (e.g., qemu-user) or obtain a native build."
+      fi
+      echo "[ERROR] - Aborting launch because required emulation is not set up."
+      return 1
+    fi
   fi
   
   # Make executable if not already
@@ -333,6 +389,8 @@ start_giproxy() {
 
 # Main function
 main() {
+  print_termux_storage_notice
+  
   # Detect architecture
   if [[ "$ARCHITECTURE" == "auto" ]]; then
     ARCHITECTURE=$(get_system_architecture)
@@ -354,6 +412,11 @@ main() {
   local git_cmd
   git_cmd=$(get_git_command)
   echo "[INFO] - Using Git: $git_cmd"
+  
+  echo "[INFO] - Checking network connectivity..."
+  if ! check_network_connectivity; then
+    echo "[WARNING] - Unable to verify internet access. Clone/update may fail."
+  fi
   
   # Check if repository exists
   local repo_exists=false
