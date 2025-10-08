@@ -1,11 +1,28 @@
-#!/bin/bash
+#!/bin/sh
 
-# Error handling - exit on unset variables but allow controlled error handling
-set -u
+if [ -z "${BASH_VERSION:-}" ]; then
+  if command -v bash >/dev/null 2>&1; then
+    exec bash "$0" "$@"
+  elif [ -x "/data/data/com.termux/files/usr/bin/bash" ]; then
+    exec "/data/data/com.termux/files/usr/bin/bash" "$0" "$@"
+  else
+    echo "[ERROR] - Bash shell is required. Install it via 'pkg install bash'." >&2
+    exit 1
+  fi
+fi
+
+set -e
+trap 'ret=$?; echo "[ERROR] - Unexpected error occurred (exit code $ret) at ${BASH_SOURCE[0]}:${BASH_LINENO[0]}" >&2; exit $ret' ERR
 
 SKIP_UPDATE=false
 FORCE_UPDATE=false
 ARCHITECTURE="auto"
+
+TERMUX_PREFIX="/data/data/com.termux/files/usr"
+IS_TERMUX=false
+if [[ -d "$TERMUX_PREFIX" ]]; then
+  IS_TERMUX=true
+fi
 
 #configuration
 REPO_URL="https://github.com/GIProxy/bin.git"
@@ -26,6 +43,10 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --arch)
+      if [[ -z "${2:-}" ]]; then
+        echo "[ERROR] - --arch requires a value (x64, x86, arm64)" >&2
+        exit 1
+      fi
       ARCHITECTURE="$2"
       shift 2
       ;;
@@ -80,33 +101,6 @@ get_system_architecture() {
 # Function to check if git is installed
 test_git_installed() {
   command -v git >/dev/null 2>&1
-}
-
-# Function to check Termux storage permissions
-check_termux_storage() {
-  # Check if we're in Termux and if storage is accessible
-  if command -v pkg >/dev/null 2>&1; then
-    if [[ ! -d "/sdcard" || ! -w "/sdcard" ]]; then
-      echo "[WARNING] - Termux storage access may be limited"
-      echo "[INFO] - You may need to run 'termux-setup-storage' to access external storage"
-      echo "[INFO] - Continuing with internal storage only..."
-    fi
-  fi
-}
-
-# Function to check network connectivity
-check_network() {
-  echo "[INFO] - Checking network connectivity..."
-  if command -v ping >/dev/null 2>&1; then
-    if ! ping -c 1 -W 5 8.8.8.8 >/dev/null 2>&1; then
-      echo "[WARNING] - Network connectivity check failed"
-      echo "[WARNING] - Git operations may fail. Check your internet connection."
-      return 1
-    fi
-  else
-    echo "[WARNING] - ping command not available, skipping network check"
-  fi
-  return 0
 }
 
 # Function to install git using pkg (Termux)
@@ -261,25 +255,7 @@ update_repository() {
 get_executable_path() {
   local arch="$1"
   
-  # For Android/Termux, try to find native ARM64 binary first
-  if command -v pkg >/dev/null 2>&1 && [[ "$arch" == "arm64" ]]; then
-    # Check for native ARM64 binary first
-    if [[ -f "$INSTALL_DIR/android/arm64/GIProxy" ]]; then
-      echo "$INSTALL_DIR/android/arm64/GIProxy"
-      return 0
-    fi
-    
-    # Check for aarch64 variant
-    if [[ -f "$INSTALL_DIR/android/aarch64/GIProxy" ]]; then
-      echo "$INSTALL_DIR/android/aarch64/GIProxy"
-      return 0
-    fi
-    
-    echo "[WARNING] - No native ARM64 binary found, falling back to x64 (may require emulation)"
-  fi
-  
   # Map arm64 to x64 for Android since there's no arm64 directory
-  # WARNING: This assumes x64 binaries work on ARM64 Android (may require emulation)
   local android_arch="$arch"
   if [[ "$arch" == "arm64" ]]; then
     android_arch="x64"
@@ -301,8 +277,6 @@ get_executable_path() {
   else
     echo "[ERROR] - Executable not found for $arch"
     echo "[ERROR] - Checked paths:"
-    echo "-  $INSTALL_DIR/android/arm64/GIProxy (native ARM64)"
-    echo "-  $INSTALL_DIR/android/aarch64/GIProxy (ARM64 variant)"
     echo "-  $INSTALL_DIR/android/$android_arch/GIProxy"
     echo "-  $INSTALL_DIR/linux/$arch/Release/GIProxy"
     echo "-  $INSTALL_DIR/linux/$arch/Debug/GIProxy"
@@ -316,8 +290,8 @@ start_giproxy() {
   local exe_path
   
   if ! exe_path=$(get_executable_path "$arch"); then
-      echo "[ERROR] - Cannot start GIProxy: executable not found"
-      exit 1
+    echo "[ERROR] - Cannot start GIProxy: executable not found"
+    exit 1
   fi
   
   if [[ ! -f "$exe_path" ]]; then
@@ -325,24 +299,8 @@ start_giproxy() {
     exit 1
   fi
   
-  # Check if file is actually executable
-  if [[ ! -x "$exe_path" ]]; then
-    echo "[INFO] - Setting executable permissions..."
-    chmod +x "$exe_path"
-  fi
-  
-  # Check file type and architecture compatibility
-  if command -v file >/dev/null 2>&1; then
-    local file_info
-    file_info=$(file "$exe_path")
-    echo "[INFO] - Binary info: $file_info"
-    
-    # Check if it's an x86_64 binary on ARM system
-    if echo "$file_info" | grep -q "x86-64\|x86_64" && [[ "$arch" == "arm64" ]]; then
-      echo "[WARNING] - Attempting to run x64 binary on ARM64 system"
-      echo "[WARNING] - This may fail or require emulation support"
-    fi
-  fi
+  # Make executable if not already
+  chmod +x "$exe_path"
   
   local working_dir="$(dirname "$exe_path")"
   
@@ -356,32 +314,16 @@ start_giproxy() {
     exit 1
   }
   
-  # Try to start the process with better error handling
-  local binary_name
-  binary_name=$(basename "$exe_path")
-  
-  echo "[INFO] - Attempting to execute: ./$binary_name"
-  
-  if ! "./$binary_name"; then
+  # Start the process
+  if ! "$exe_path"; then
     local exit_code=$?
-    echo "[ERROR] - GIProxy execution failed with exit code: $exit_code"
-    
-    # Provide helpful error messages based on common issues
-    case $exit_code in
-      126)
-        echo "[ERROR] - Permission denied or binary cannot be executed"
-        echo "[HINT] - This might be an architecture mismatch (x64 binary on ARM64 system)"
-        ;;
-      127)
-        echo "[ERROR] - Command not found or missing dependencies"
-        echo "[HINT] - Check if all required libraries are installed"
-        ;;
-      *)
-        echo "[ERROR] - Unknown execution error"
-        echo "[HINT] - Check system logs or try running with strace for more details"
-        ;;
-    esac
-    
+    echo "[ERROR] - Error running GIProxy (exit code $exit_code)"
+    if [[ "$exit_code" -eq 126 ]]; then
+      echo "[HINT] - Exec format error detected. Ensure the selected architecture matches your device."
+      if [[ "$IS_TERMUX" == true && "$arch" != "x64" ]]; then
+        echo "[HINT] - On Termux (aarch64 devices), use a proot-distro with x86_64 binaries or compile GIProxy for arm64." 
+      fi
+    fi
     cd "$original_dir" || true
     exit 1
   fi
@@ -391,9 +333,6 @@ start_giproxy() {
 
 # Main function
 main() {
-  # Check Termux storage permissions
-  check_termux_storage
-  
   # Detect architecture
   if [[ "$ARCHITECTURE" == "auto" ]]; then
     ARCHITECTURE=$(get_system_architecture)
@@ -415,9 +354,6 @@ main() {
   local git_cmd
   git_cmd=$(get_git_command)
   echo "[INFO] - Using Git: $git_cmd"
-  
-  # Check network connectivity before git operations
-  check_network
   
   # Check if repository exists
   local repo_exists=false
