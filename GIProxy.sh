@@ -1,487 +1,346 @@
 #!/bin/bash
 
-# ========================================
-# GIProxy Auto-Updater and Launcher (SH)
-# ========================================
-# Version: 2.0.0
-# Author: GIProxy Team
-# Optimized for Termux Android Environment
+# GIProxy Auto-Updater and Launcher
+# Automatically installs Git if needed, clones/updates the GIProxy binary repository,
+# and launches the appropriate executable for your system architecture.
 
-set -e
+# Default values
+SKIP_UPDATE=false
+FORCE_UPDATE=false
+ARCHITECTURE="auto"
 
 # Configuration
 REPO_URL="https://github.com/GIProxy/bin.git"
 REPO_BRANCH="main"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_DIR="$SCRIPT_DIR/GIProxy"
 VERSION_FILE="version"
-SKIP_UPDATE=0
-FORCE_UPDATE=0
-FORCE_ARCH=""
-
-# Check if we're already in the repository (version file exists)
-if [ -f "$SCRIPT_DIR/$VERSION_FILE" ]; then
-    INSTALL_DIR="$SCRIPT_DIR"
-    IN_REPO=1
-else
-    INSTALL_DIR="$SCRIPT_DIR/GIProxy"
-    IN_REPO=0
-fi
-
-# Get the directory where this script is located (bin folder)
-BIN_DIR="$INSTALL_DIR"
 
 # Colors for output
-COLOR_INFO="\033[0;36m"
-COLOR_SUCCESS="\033[0;32m"
-COLOR_WARNING="\033[0;33m"
-COLOR_ERROR="\033[0;31m"
-COLOR_RESET="\033[0m"
+COLOR_INFO='\033[0;36m'     # Cyan
+COLOR_SUCCESS='\033[0;32m'  # Green
+COLOR_WARNING='\033[0;33m'  # Yellow
+COLOR_ERROR='\033[0;31m'    # Red
+COLOR_RESET='\033[0m'       # Reset
 
-# Parse arguments
+# Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -SkipUpdate|--skip-update)
-            SKIP_UPDATE=1
+        --skip-update)
+            SKIP_UPDATE=true
             shift
             ;;
-        -ForceUpdate|--force-update)
-            FORCE_UPDATE=1
+        --force-update)
+            FORCE_UPDATE=true
             shift
             ;;
-        -Architecture|--architecture)
-            FORCE_ARCH="$2"
+        --arch)
+            ARCHITECTURE="$2"
             shift 2
             ;;
+        -h|--help)
+            echo "Usage: $0 [OPTIONS]"
+            echo "Options:"
+            echo "  --skip-update    Skip repository update"
+            echo "  --force-update   Force repository update"
+            echo "  --arch ARCH      Set architecture (x64, x86, arm64, auto)"
+            echo "  -h, --help       Show this help message"
+            exit 0
+            ;;
         *)
-            echo -e "${COLOR_ERROR}[ERROR] Unknown option: $1${COLOR_RESET}"
+            echo "Unknown option: $1"
             exit 1
             ;;
     esac
 done
 
-# Helper functions
-log_info() {
-    echo -e "${COLOR_INFO}[INFO] $1${COLOR_RESET}"
-}
-
-log_success() {
-    echo -e "${COLOR_SUCCESS}[SUCCESS] $1${COLOR_RESET}"
-}
-
-log_warning() {
-    echo -e "${COLOR_WARNING}[WARNING] $1${COLOR_RESET}"
-}
-
-log_error() {
-    echo -e "${COLOR_ERROR}[ERROR] $1${COLOR_RESET}"
-}
-
-# Detect Android architecture for Termux
-detect_android_arch() {
-    local machine=$(uname -m)
-    local arch=""
+# Function to output colored messages
+write_color_output() {
+    local message="$1"
+    local type="${2:-INFO}"
     
-    if [ -n "$FORCE_ARCH" ]; then
-        arch="$FORCE_ARCH"
+    case "$type" in
+        "SUCCESS")
+            echo -e "${COLOR_SUCCESS}[SUCCESS]${COLOR_RESET} $message"
+            ;;
+        "WARNING")
+            echo -e "${COLOR_WARNING}[WARNING]${COLOR_RESET} $message"
+            ;;
+        "ERROR")
+            echo -e "${COLOR_ERROR}[ERROR]${COLOR_RESET} $message"
+            ;;
+        *)
+            echo -e "${COLOR_INFO}[INFO]${COLOR_RESET} $message"
+            ;;
+    esac
+}
+
+# Function to detect system architecture
+get_system_architecture() {
+    local arch
+    
+    # Try multiple methods to detect architecture
+    if command -v uname >/dev/null 2>&1; then
+        arch=$(uname -m)
+    elif [[ -n "$HOSTTYPE" ]]; then
+        arch="$HOSTTYPE"
     else
-        case $machine in
-            x86_64|amd64)
-                arch="x64"
-                ;;
-            i386|i686)
-                arch="x86"
-                ;;
-            aarch64|arm64)
-                arch="arm64"
-                ;;
-            armv7l|armv7)
-                arch="armv7"
-                ;;
-            *)
-                # Default to x64 if unknown
-                arch="x64"
-                ;;
-        esac
+        arch="unknown"
     fi
     
-    echo "$arch"
+    case "$arch" in
+        x86_64|amd64)
+            echo "x64"
+            ;;
+        i386|i686|x86)
+            echo "x86"
+            ;;
+        aarch64|arm64)
+            echo "arm64"
+            ;;
+        armv7l|armv6l|arm)
+            echo "arm64"  # Default to arm64 for ARM on Android
+            ;;
+        *)
+            echo "arm64"  # Default for Android/Termux
+            ;;
+    esac
 }
 
-# Detect platform and architecture (legacy support for other platforms)
-detect_platform() {
-    local platform=""
-    local arch=""
-    
-    # Detect OS
-    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        platform="linux"
-    elif [[ "$OSTYPE" == "linux-android"* ]] || check_termux_environment; then
-        platform="android"
-    elif [[ "$OSTYPE" == "darwin"* ]]; then
-        platform="macos"
-    else
-        platform="android"  # Default to android for Termux
-    fi
-    
-    # Detect architecture
-    if [ -n "$FORCE_ARCH" ]; then
-        arch="$FORCE_ARCH"
-    else
-        local machine=$(uname -m)
-        case $machine in
-            x86_64|amd64)
-                arch="x64"
-                ;;
-            i386|i686)
-                arch="x86"
-                ;;
-            aarch64|arm64)
-                arch="arm64"
-                ;;
-            armv7l)
-                arch="armv7"
-                ;;
-            *)
-                arch="x64"
-                ;;
-        esac
-    fi
-    
-    echo "$platform:$arch"
+# Function to check if git is installed
+test_git_installed() {
+    command -v git >/dev/null 2>&1
 }
 
-# Check if running in Termux
-check_termux_environment() {
-    if [ -n "$TERMUX_VERSION" ] || [ -d "/data/data/com.termux" ] || [[ "$PREFIX" == *"termux"* ]]; then
-        return 0
-    fi
-    return 1
-}
-
-# Check if Git is installed
-check_git() {
-    if command -v git &> /dev/null; then
-        return 0
-    fi
-    return 1
-}
-
-# Install Git
+# Function to install git using pkg (Termux)
 install_git() {
-    log_warning "Git is not installed. Attempting automatic installation..."
-    echo ""
+    write_color_output "Git not found. Installing Git using pkg..." "INFO"
     
-    local install_success=0
-    
-    if [[ "$OSTYPE" == "linux-android"* ]] || check_termux_environment; then
-        # Termux
-        log_info "Installing Git via Termux package manager..."
-        if pkg install -y git &> /dev/null; then
-            install_success=1
-        fi
-    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        # Linux distributions
-        if command -v apt-get &> /dev/null; then
-            log_info "Installing Git via apt-get..."
-            if sudo apt-get update &> /dev/null && sudo apt-get install -y git &> /dev/null; then
-                install_success=1
-            fi
-        elif command -v dnf &> /dev/null; then
-            log_info "Installing Git via dnf..."
-            if sudo dnf install -y git &> /dev/null; then
-                install_success=1
-            fi
-        elif command -v pacman &> /dev/null; then
-            log_info "Installing Git via pacman..."
-            if sudo pacman -S --noconfirm git &> /dev/null; then
-                install_success=1
-            fi
-        elif command -v yum &> /dev/null; then
-            log_info "Installing Git via yum..."
-            if sudo yum install -y git &> /dev/null; then
-                install_success=1
-            fi
-        fi
-    elif [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS
-        if command -v brew &> /dev/null; then
-            log_info "Installing Git via Homebrew..."
-            if brew install git &> /dev/null; then
-                install_success=1
-            fi
-        else
-            log_info "Installing Git via Xcode Command Line Tools..."
-            if xcode-select --install &> /dev/null; then
-                log_warning "Xcode tools installation started. Please complete the installation and run this script again."
-                exit 0
-            fi
-        fi
+    # Check if we're in Termux
+    if ! command -v pkg >/dev/null 2>&1; then
+        write_color_output "pkg command not found. This script is designed for Termux (Android)." "ERROR"
+        write_color_output "Please install git manually or run this script in Termux." "ERROR"
+        exit 1
     fi
     
-    if [ $install_success -eq 1 ]; then
-        log_success "Git installed successfully!"
-        echo ""
-        return 0
+    # Update package list and install git
+    write_color_output "Updating package list..." "INFO"
+    if ! pkg update -y; then
+        write_color_output "Failed to update package list" "ERROR"
+        exit 1
+    fi
+    
+    write_color_output "Installing git..." "INFO"
+    if ! pkg install git -y; then
+        write_color_output "Failed to install git" "ERROR"
+        exit 1
+    fi
+    
+    # Verify installation
+    if test_git_installed; then
+        write_color_output "Git installed successfully!" "SUCCESS"
     else
-        log_error "Failed to install Git automatically!"
-        echo ""
-        echo "Please install Git manually using one of the following commands:"
-        echo ""
-        
-        if check_termux_environment; then
-            echo "  Termux:     pkg install git"
-        elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-            echo "  Ubuntu/Debian:  sudo apt-get install git"
-            echo "  Fedora:         sudo dnf install git"
-            echo "  Arch:           sudo pacman -S git"
-        elif [[ "$OSTYPE" == "darwin"* ]]; then
-            echo "  macOS (Homebrew):  brew install git"
-            echo "  macOS (Xcode):     xcode-select --install"
-        fi
-        
-        echo ""
+        write_color_output "Git installation failed - command not found after installation" "ERROR"
         exit 1
     fi
 }
 
-# Get local version
+# Function to get git command
+get_git_command() {
+    if test_git_installed; then
+        echo "git"
+    else
+        install_git
+        echo "git"
+    fi
+}
+
+# Function to get local version
 get_local_version() {
-    local version_file="$INSTALL_DIR/$VERSION_FILE"
-    if [ -f "$version_file" ]; then
-        cat "$version_file" | tr -d '[:space:]'
+    local version_path="$INSTALL_DIR/$VERSION_FILE"
+    if [[ -f "$version_path" ]]; then
+        cat "$version_path" | tr -d '\n\r'
     else
         echo ""
     fi
 }
 
-# Initialize repository
-initialize_repository() {
-    log_info "Cloning repository from $REPO_URL..."
+# Function to get remote version
+get_remote_version() {
+    local git_cmd="$1"
     
-    if git clone --branch "$REPO_BRANCH" "$REPO_URL" "$INSTALL_DIR"; then
-        log_success "Repository cloned successfully!"
+    local remote_version
+    if remote_version=$($git_cmd ls-remote --heads "$REPO_URL" "$REPO_BRANCH" 2>/dev/null); then
+        if [[ -n "$remote_version" ]]; then
+            echo "$remote_version" | awk '{print substr($1,1,7)}'
+            return 0
+        fi
+    fi
+    
+    write_color_output "Failed to get remote version" "WARNING"
+    echo ""
+}
+
+# Function to initialize repository
+initialize_repository() {
+    local git_cmd="$1"
+    
+    write_color_output "Cloning repository from $REPO_URL..." "INFO"
+    
+    if $git_cmd clone --branch "$REPO_BRANCH" "$REPO_URL" "$INSTALL_DIR"; then
+        write_color_output "Repository cloned successfully!" "SUCCESS"
         return 0
     else
-        log_error "Failed to clone repository"
+        write_color_output "Failed to clone repository" "ERROR"
         return 1
     fi
 }
 
-# Update repository
+# Function to update repository
 update_repository() {
-    log_info "Updating repository..."
+    local git_cmd="$1"
     
-    cd "$INSTALL_DIR"
+    write_color_output "Updating repository..." "INFO"
+    
+    local original_dir="$PWD"
+    cd "$INSTALL_DIR" || {
+        write_color_output "Failed to change to repository directory" "ERROR"
+        return 1
+    }
+    
+    local success=true
     
     # Fetch latest changes
-    if ! git fetch origin "$REPO_BRANCH" 2>&1 | grep -v "^$"; then
-        log_error "Git fetch failed"
-        cd "$SCRIPT_DIR"
+    if ! $git_cmd fetch origin "$REPO_BRANCH" >/dev/null 2>&1; then
+        write_color_output "Git fetch failed" "ERROR"
+        success=false
+    fi
+    
+    if [[ "$success" == "true" ]]; then
+        # Stash local changes to preserve user data
+        write_color_output "Preserving local changes..." "INFO"
+        local stashed=false
+        if $git_cmd stash push -m "Auto-stash before update $(date '+%Y-%m-%d %H:%M:%S')" >/dev/null 2>&1; then
+            stashed=true
+        fi
+        
+        # Pull with rebase to avoid merge commits
+        write_color_output "Pulling latest changes..." "INFO"
+        if ! $git_cmd pull origin "$REPO_BRANCH" --rebase >/dev/null 2>&1; then
+            write_color_output "Pull failed, attempting to resolve..." "WARNING"
+            
+            # Try to continue rebase
+            if ! $git_cmd rebase --continue >/dev/null 2>&1; then
+                # Abort rebase and try merge instead
+                $git_cmd rebase --abort >/dev/null 2>&1
+                $git_cmd pull origin "$REPO_BRANCH" --strategy-option=theirs >/dev/null 2>&1
+            fi
+        fi
+        
+        # Restore stashed changes
+        if [[ "$stashed" == "true" ]]; then
+            write_color_output "Restoring local changes..." "INFO"
+            if ! $git_cmd stash pop >/dev/null 2>&1; then
+                write_color_output "Could not automatically restore all changes. Check 'git stash list' manually." "WARNING"
+            fi
+        fi
+        
+        write_color_output "Repository updated successfully!" "SUCCESS"
+    else
+        # Try to recover
+        $git_cmd rebase --abort >/dev/null 2>&1
+        $git_cmd merge --abort >/dev/null 2>&1
+    fi
+    
+    cd "$original_dir" || true
+    
+    if [[ "$success" == "true" ]]; then
+        return 0
+    else
         return 1
     fi
-    
-    # Stash local changes
-    log_info "Preserving local changes..."
-    git stash push -m "Auto-stash before update $(date)" &> /dev/null
-    local stashed=$?
-    
-    # Pull with rebase
-    log_info "Pulling latest changes..."
-    if ! git pull origin "$REPO_BRANCH" --rebase &> /dev/null; then
-        log_warning "Pull failed, attempting to resolve..."
-        git rebase --abort &> /dev/null
-        git pull origin "$REPO_BRANCH" --strategy-option=theirs &> /dev/null
-    fi
-    
-    # Restore stashed changes
-    if [ $stashed -eq 0 ]; then
-        log_info "Restoring local changes..."
-        if ! git stash pop &> /dev/null; then
-            log_warning "Could not automatically restore all changes. Check 'git stash list' manually."
-        fi
-    fi
-    
-    log_success "Repository updated successfully!"
-    cd "$SCRIPT_DIR"
-    return 0
 }
 
-# Fix Android binary permissions after update
-fix_android_permissions() {
-    log_info "Setting executable permissions for Android binaries..."
-    
-    # Set permissions for all Android architectures
-    for arch_dir in "$INSTALL_DIR"/android/*/; do
-        if [ -d "$arch_dir" ]; then
-            local binary="$arch_dir/GIProxy"
-            if [ -f "$binary" ]; then
-                chmod +x "$binary" 2>/dev/null
-                local arch_name=$(basename "$arch_dir")
-                log_success "Set executable permission for android/$arch_name/GIProxy"
-            fi
-        fi
-    done
-}
-
-# Check if GIProxy executable exists for detected architecture
-find_giproxy_executable() {
-    local arch="$1"
-    local exe_path="$BIN_DIR/android/$arch/GIProxy"
-    
-    if [ -f "$exe_path" ]; then
-        echo "$exe_path"
-        return 0
-    fi
-    
-    # Fallback: try other architectures
-    for fallback_arch in x64 x86 arm64 armv7; do
-        if [ "$fallback_arch" != "$arch" ]; then
-            local fallback_path="$BIN_DIR/android/$fallback_arch/GIProxy"
-            if [ -f "$fallback_path" ]; then
-                log_warning "Using fallback architecture: $fallback_arch (detected: $arch)"
-                echo "$fallback_path"
-                return 0
-            fi
-        fi
-    done
-    
-    return 1
-}
-
-# Get executable path (enhanced version supporting all platforms)
+# Function to get executable path
 get_executable_path() {
-    local platform="$1"
-    local arch="$2"
-    local exe_path=""
-    local build_type=""
+    local arch="$1"
     
-    # Determine build type and path based on platform
-    if [ "$platform" == "android" ]; then
-        # Android executables - use enhanced detection
-        exe_path=$(find_giproxy_executable "$arch")
-        if [ $? -eq 0 ]; then
-            echo "$exe_path"
-            return 0
-        else
-            log_error "Executable not found for Android $arch"
-            log_error "Expected path: $INSTALL_DIR/android/$arch/GIProxy"
-            return 1
-        fi
-    elif [ "$platform" == "linux" ]; then
-        # Linux executables
-        if [ -f "$INSTALL_DIR/linux/$arch/Release/GIProxy" ]; then
-            build_type="Release"
-        else
-            build_type="Debug"
-        fi
-        exe_path="$INSTALL_DIR/linux/$arch/$build_type/GIProxy"
-    elif [ "$platform" == "macos" ]; then
-        # macOS executables
-        if [ -f "$INSTALL_DIR/macos/$arch/Release/GIProxy" ]; then
-            build_type="Release"
-        else
-            build_type="Debug"
-        fi
-        exe_path="$INSTALL_DIR/macos/$arch/$build_type/GIProxy"
-    else
-        log_error "Unsupported platform: $platform"
-        return 1
+    # Map arm64 to x64 for Android since there's no arm64 directory
+    local android_arch="$arch"
+    if [[ "$arch" == "arm64" ]]; then
+        android_arch="x64"
+        write_color_output "Mapping arm64 to x64 for Android compatibility" "INFO"
     fi
     
-    if [ -f "$exe_path" ]; then
-        echo "$exe_path"
+    # Android executables are directly in the arch directory (no Release/Debug subdirs)
+    if [[ -f "$INSTALL_DIR/android/$android_arch/GIProxy" ]]; then
+        echo "$INSTALL_DIR/android/$android_arch/GIProxy"
+        return 0
+    fi
+    
+    # Try alternative paths for different platforms
+    if [[ -f "$INSTALL_DIR/linux/$arch/Release/GIProxy" ]]; then
+        echo "$INSTALL_DIR/linux/$arch/Release/GIProxy"
+        return 0
+    elif [[ -f "$INSTALL_DIR/linux/$arch/Debug/GIProxy" ]]; then
+        echo "$INSTALL_DIR/linux/$arch/Debug/GIProxy"
         return 0
     else
-        log_error "Executable not found for $platform $arch ($build_type)"
-        log_error "Expected path: $exe_path"
+        write_color_output "Executable not found for $arch" "ERROR"
+        write_color_output "Checked paths:" "ERROR"
+        write_color_output "  $INSTALL_DIR/android/$android_arch/GIProxy" "ERROR"
+        write_color_output "  $INSTALL_DIR/linux/$arch/Release/GIProxy" "ERROR"
+        write_color_output "  $INSTALL_DIR/linux/$arch/Debug/GIProxy" "ERROR"
         return 1
     fi
 }
 
-# Check if running in Termux
-check_termux_environment() {
-    if [ -n "$TERMUX_VERSION" ] || [ -d "/data/data/com.termux" ] || [[ "$PREFIX" == *"termux"* ]]; then
-        return 0
-    fi
-    return 1
-}
-
-# Start GIProxy (optimized for Termux Android with main thread execution)
+# Function to start GIProxy
 start_giproxy() {
-    local platform="$1"
-    local arch="$2"
+    local arch="$1"
+    local exe_path
     
-    local exe_path=$(get_executable_path "$platform" "$arch")
-    if [ $? -ne 0 ]; then
-        log_error "Cannot start GIProxy: executable not found"
+    if ! exe_path=$(get_executable_path "$arch"); then
+        write_color_output "Cannot start GIProxy: executable not found" "ERROR"
+        exit 1
+    fi
+    
+    if [[ ! -f "$exe_path" ]]; then
+        write_color_output "Cannot start GIProxy: executable not found at $exe_path" "ERROR"
         exit 1
     fi
     
     # Make executable if not already
-    chmod +x "$exe_path" 2>/dev/null
+    chmod +x "$exe_path"
     
-    # For Termux Android optimization: use bin directory as working directory
-    if [ "$platform" == "android" ] && check_termux_environment; then
-        log_info "Termux Android detected - optimizing execution..."
-        
-        # Set working directory to bin folder
-        log_info "Setting working directory to: $BIN_DIR"
-        cd "$BIN_DIR"
-        
-        # Verify required files exist
-        if [ ! -f "config.txt" ]; then
-            log_warning "config.txt not found in bin directory"
-        fi
-        
-        if [ ! -f "items.dat" ]; then
-            log_warning "items.dat not found in bin directory"
-        fi
-        
-        # Get relative path for execution
-        local relative_path=$(realpath --relative-to="$BIN_DIR" "$exe_path")
-        
-        log_info "Starting GIProxy..."
-        log_info "Executable: $exe_path"
-        log_info "Relative Path: $relative_path"
-        log_info "Working Dir: $BIN_DIR"
-        log_info "Architecture: $arch"
-        echo ""
-        echo -e "${COLOR_SUCCESS}================================${COLOR_RESET}"
-        echo -e "${COLOR_SUCCESS}     GIProxy is starting...      ${COLOR_RESET}"
-        echo -e "${COLOR_SUCCESS}     (Termux Optimized)         ${COLOR_RESET}"
-        echo -e "${COLOR_SUCCESS}================================${COLOR_RESET}"
-        echo ""
-        
-        # Execute GIProxy in main thread with relative path
-        exec "./$relative_path"
-    else
-        # Standard execution for other platforms
-        local working_dir=$(dirname "$exe_path")
-        
-        log_info "Starting GIProxy..."
-        log_info "Executable: $exe_path"
-        log_info "Working Directory: $working_dir"
-        echo ""
-        echo -e "${COLOR_SUCCESS}================================${COLOR_RESET}"
-        echo -e "${COLOR_SUCCESS}     GIProxy Starting...        ${COLOR_RESET}"
-        echo -e "${COLOR_SUCCESS}================================${COLOR_RESET}"
-        echo ""
-        
-        cd "$working_dir"
-        "$exe_path"
-        local exit_code=$?
-        
-        if [ $exit_code -ne 0 ]; then
-            echo ""
-            log_error "GIProxy exited with error code $exit_code"
-        fi
-        
-        cd "$SCRIPT_DIR"
-        return $exit_code
+    local working_dir="$(dirname "$exe_path")"
+    
+    write_color_output "Starting GIProxy..." "INFO"
+    write_color_output "Executable: $exe_path" "INFO"
+    write_color_output "Working Directory: $working_dir" "INFO"
+    write_color_output "" "INFO"
+    echo -e "${COLOR_SUCCESS}================================${COLOR_RESET}"
+    echo -e "${COLOR_SUCCESS}     GIProxy Starting...        ${COLOR_RESET}"
+    echo -e "${COLOR_SUCCESS}================================${COLOR_RESET}"
+    echo ""
+    
+    local original_dir="$PWD"
+    cd "$working_dir" || {
+        write_color_output "Failed to change to working directory" "ERROR"
+        exit 1
+    }
+    
+    # Start the process
+    if ! "$exe_path"; then
+        write_color_output "Error running GIProxy" "ERROR"
+        cd "$original_dir" || true
+        exit 1
     fi
+    
+    cd "$original_dir" || true
 }
 
-# Main execution
+# Main function
 main() {
     echo ""
     echo -e "${COLOR_INFO}========================================${COLOR_RESET}"
@@ -489,127 +348,81 @@ main() {
     echo -e "${COLOR_INFO}========================================${COLOR_RESET}"
     echo ""
     
-    # Detect platform and architecture
-    local platform_info=$(detect_platform)
-    local platform="${platform_info%%:*}"
-    local arch="${platform_info##*:}"
-    
-    log_info "Platform: $platform"
-    log_info "Architecture: $arch"
-    
-    # Check if running in Termux
-    if check_termux_environment; then
-        log_success "Termux environment detected"
-    fi
-    echo ""
-    
-    # Check Git installation (skip for Termux if not needed for updates)
-    if [ $SKIP_UPDATE -eq 0 ]; then
-        if ! check_git; then
-            install_git
-        fi
-        
-        log_info "Using Git: $(command -v git)"
-        echo ""
+    # Detect architecture
+    if [[ "$ARCHITECTURE" == "auto" ]]; then
+        ARCHITECTURE=$(get_system_architecture)
+        write_color_output "Detected architecture: $ARCHITECTURE" "INFO"
     fi
     
-    # Check if we're already in the repository or need to clone
-    if [ $IN_REPO -eq 1 ]; then
-        log_info "Running from repository directory"
+    # Validate architecture
+    case "$ARCHITECTURE" in
+        x64|x86|arm64)
+            ;;
+        *)
+            write_color_output "Unsupported architecture: $ARCHITECTURE" "ERROR"
+            write_color_output "Supported architectures: x64, x86, arm64" "ERROR"
+            exit 1
+            ;;
+    esac
+    
+    # Get Git command
+    local git_cmd
+    git_cmd=$(get_git_command)
+    write_color_output "Using Git: $git_cmd" "INFO"
+    
+    # Check if repository exists
+    local repo_exists=false
+    if [[ -d "$INSTALL_DIR/.git" ]]; then
+        repo_exists=true
+    fi
+    
+    if [[ "$repo_exists" == "false" ]]; then
+        write_color_output "Repository not found. Initializing..." "INFO"
         
-        if [ $SKIP_UPDATE -eq 0 ]; then
-            # Check version
-            local local_version=$(get_local_version)
-            if [ -z "$local_version" ]; then
-                log_info "Local version: unknown"
-            else
-                log_info "Local version: $local_version"
-            fi
-            
-            if [ $FORCE_UPDATE -eq 1 ]; then
-                log_warning "Force update requested"
-                update_repository
-                
-                # Fix Android permissions after update
-                if [ "$platform" == "android" ]; then
-                    fix_android_permissions
-                fi
-            else
-                log_info "Checking for updates..."
-                update_repository
-                
-                local new_version=$(get_local_version)
-                if [ -n "$new_version" ] && [ "$new_version" != "$local_version" ]; then
-                    log_success "Updated from version $local_version to $new_version"
-                    
-                    # Fix Android permissions after update
-                    if [ "$platform" == "android" ]; then
-                        fix_android_permissions
-                    fi
-                else
-                    log_success "Already up to date"
-                fi
-            fi
-        else
-            log_warning "Skipping update check"
-        fi
-    elif [ ! -d "$INSTALL_DIR/.git" ] && [ $SKIP_UPDATE -eq 0 ]; then
-        log_info "Repository not found. Initializing..."
-        if ! initialize_repository; then
-            log_error "Failed to initialize repository"
+        if ! initialize_repository "$git_cmd"; then
+            write_color_output "Failed to initialize repository" "ERROR"
             exit 1
         fi
-        
-        # Fix Android permissions after initial clone
-        if [ "$platform" == "android" ]; then
-            fix_android_permissions
-        fi
-    elif [ $SKIP_UPDATE -eq 0 ]; then
+    elif [[ "$SKIP_UPDATE" == "false" ]]; then
         # Check version
-        local local_version=$(get_local_version)
-        if [ -z "$local_version" ]; then
-            log_info "Local version: unknown"
+        local local_version
+        local_version=$(get_local_version)
+        local version_display
+        if [[ -n "$local_version" ]]; then
+            version_display="$local_version"
         else
-            log_info "Local version: $local_version"
+            version_display="unknown"
         fi
+        write_color_output "Local version: $version_display" "INFO"
         
-        if [ $FORCE_UPDATE -eq 1 ]; then
-            log_warning "Force update requested"
-            update_repository
-            
-            # Fix Android permissions after update
-            if [ "$platform" == "android" ]; then
-                fix_android_permissions
-            fi
+        if [[ "$FORCE_UPDATE" == "true" ]]; then
+            write_color_output "Force update requested" "WARNING"
+            update_repository "$git_cmd"
         else
-            log_info "Checking for updates..."
-            update_repository
+            # Always try to update to get latest changes
+            write_color_output "Checking for updates..." "INFO"
+            update_repository "$git_cmd"
             
-            local new_version=$(get_local_version)
-            if [ -n "$new_version" ] && [ "$new_version" != "$local_version" ]; then
-                log_success "Updated from version $local_version to $new_version"
-                
-                # Fix Android permissions after update
-                if [ "$platform" == "android" ]; then
-                    fix_android_permissions
-                fi
+            local new_version
+            new_version=$(get_local_version)
+            if [[ -n "$new_version" && "$new_version" != "$local_version" ]]; then
+                write_color_output "Updated from version $local_version to $new_version" "SUCCESS"
             else
-                log_success "Already up to date"
+                write_color_output "Already up to date" "SUCCESS"
             fi
         fi
     else
-        log_warning "Skipping update check"
+        write_color_output "Skipping update check" "WARNING"
     fi
     
     # Start GIProxy
     echo ""
-    start_giproxy "$platform" "$arch"
+    start_giproxy "$ARCHITECTURE"
 }
 
-# Trap signals to ensure clean exit
-trap 'echo ""; log_info "Script interrupted"; exit 130' INT
-trap 'echo ""; log_info "Script terminated"; exit 143' TERM
+# Error handling
+set -e
+trap 'write_color_output "Unexpected error occurred" "ERROR"; exit 1' ERR
 
 # Run main function
 main "$@"
-}
