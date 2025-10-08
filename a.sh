@@ -26,7 +26,7 @@ fi
 
 HOST_ARCH=$(uname -m 2>/dev/null || echo unknown)
 BINARY_ARCH=""
-NEEDS_EMULATION=false
+NEEDS_EMULATION=0
 STORAGE_CHECK_PERFORMED=false
 
 #configuration
@@ -287,6 +287,7 @@ get_executable_path() {
   # Prefer architecture-specific Android builds first
   if [[ -f "$INSTALL_DIR/android/$arch/GIProxy" ]]; then
     BINARY_ARCH="$arch"
+    NEEDS_EMULATION=0
     echo "$INSTALL_DIR/android/$arch/GIProxy"
     return 0
   fi
@@ -296,7 +297,7 @@ get_executable_path() {
     local fallback_path="$INSTALL_DIR/android/x64/GIProxy"
     if [[ -f "$fallback_path" ]]; then
       BINARY_ARCH="x64"
-      NEEDS_EMULATION=true
+      NEEDS_EMULATION=1
       echo "[WARNING] - No native ARM64 binary found. Using x64 build (emulation required)." >&2
       echo "$fallback_path"
       return 0
@@ -306,16 +307,21 @@ get_executable_path() {
   # Try alternative paths for different platforms
   if [[ -f "$INSTALL_DIR/linux/$arch/Release/GIProxy" ]]; then
     BINARY_ARCH="$arch"
+    NEEDS_EMULATION=0
     echo "$INSTALL_DIR/linux/$arch/Release/GIProxy"
     return 0
   elif [[ -f "$INSTALL_DIR/linux/$arch/Debug/GIProxy" ]]; then
     BINARY_ARCH="$arch"
+    NEEDS_EMULATION=0
     echo "$INSTALL_DIR/linux/$arch/Debug/GIProxy"
     return 0
   else
     echo "[ERROR] - Executable not found for $arch"
     echo "[ERROR] - Checked paths:"
-    echo "-  $INSTALL_DIR/android/$android_arch/GIProxy"
+    echo "-  $INSTALL_DIR/android/$arch/GIProxy"
+    if [[ "$arch" == "arm64" ]]; then
+      echo "-  $INSTALL_DIR/android/x64/GIProxy"
+    fi
     echo "-  $INSTALL_DIR/linux/$arch/Release/GIProxy"
     echo "-  $INSTALL_DIR/linux/$arch/Debug/GIProxy"
     return 1
@@ -337,7 +343,17 @@ start_giproxy() {
     exit 1
   fi
   
-  if [[ "$NEEDS_EMULATION" == true ]]; then
+  local exe_dir
+  exe_dir=$(cd "$(dirname "$exe_path")" >/dev/null 2>&1 && pwd)
+  if [[ -z "$exe_dir" ]]; then
+    echo "[ERROR] - Unable to resolve executable directory for $exe_path"
+    exit 1
+  fi
+  local exe_file
+  exe_file="$(basename "$exe_path")"
+  local exe_abs="$exe_dir/$exe_file"
+  
+  if (( NEEDS_EMULATION )); then
     if [[ "$HOST_ARCH" =~ ^(x86_64|amd64)$ ]]; then
       echo "[INFO] - Host is x86_64; continuing with x64 fallback binary."
     else
@@ -356,12 +372,12 @@ start_giproxy() {
   fi
   
   # Make executable if not already
-  chmod +x "$exe_path"
+  chmod +x "$exe_abs"
   
-  local working_dir="$(dirname "$exe_path")"
+  local working_dir="$exe_dir"
   
   echo "[INFO] - Starting GIProxy..."
-  echo "[INFO] - Executable: $exe_path"
+  echo "[INFO] - Executable: $exe_abs"
   echo "[INFO] - Working Directory: $working_dir"
   
   local original_dir="$PWD"
@@ -371,7 +387,7 @@ start_giproxy() {
   }
   
   # Start the process
-  if ! "$exe_path"; then
+  if ! "./$exe_file"; then
     local exit_code=$?
     echo "[ERROR] - Error running GIProxy (exit code $exit_code)"
     if [[ "$exit_code" -eq 126 ]]; then
